@@ -8,6 +8,7 @@ output: github_document
 library(tidyverse)
 library(rvest)
 library(patchwork)
+library(modelr)
 
 knitr::opts_chunk$set(
   fig.width = 6,
@@ -30,7 +31,7 @@ scale_fill_discrete = scale_fill_viridis_d
 
 Read in the data.
 
-```{r}
+```{r import1, message = FALSE}
 homicide_df = 
   read_csv("./data/homicide-data.csv") %>% 
   mutate(
@@ -49,7 +50,7 @@ homicide_df =
 
 Start with one city.
 
-```{r}
+```{r baltimore, message = FALSE}
 baltimore_df = 
   homicide_df %>% 
   filter(city_state == "Baltimore, MD")
@@ -69,7 +70,7 @@ glm(resolution ~ victim_age + victim_race + victim_sex,
 
 Try this across cities.
 
-```{r}
+```{r all_cities, message = FALSE}
 model_results_df = 
   homicide_df %>% 
   nest(data = -city_state) %>% 
@@ -91,7 +92,7 @@ model_results_df =
    select(city_state, term, OR, starts_with("CI"))
 ```
 
-```{r}
+```{r city_plot, message = FALSE}
 model_results_df %>% 
   filter(term == "victim_sexMale") %>% 
   mutate(city_state = fct_reorder(city_state, OR)) %>% 
@@ -101,31 +102,117 @@ model_results_df %>%
   theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.6))
 ```
 
-## Problem 2
+## Problem 2 
 
-```{r}
+We will be looking at data on baby birthweight and building regression models incorporating various social and biological covariates.
+
+```{r import_tidy_baby, message = FALSE}
 baby_df = 
-  read_csv("./data/birthweight.csv")
+  read_csv("./data/birthweight.csv") %>% 
+  mutate(
+    babysex = as_factor(babysex),
+    frace = as_factor(frace),
+    malform = as_factor(malform),
+    mrace = as_factor(mrace),
+    parity = as_factor(parity),
+    pnumsga = as_factor(pnumsga),
+    prior_lbw = case_when(
+      pnumlbw == 0 ~ 0,
+      pnumlbw > 0  ~ 1
+    ),
+    prior_lbw = as_factor(prior_lbw)
+  )
 ```
 
-Fit a model 
+#### Fit the models
 
-```{r}
-model_fit = lm(bwt ~ gaweeks, data = baby_df)
+We will be comparing three models: a crude model with just length and gestational weeks; an interactions model with head circumference, length, sex, and all interactions (including 3-way); and a full model, that includes head circumference, length, sex, mother's race as a proxy for lived experience of racism, family income as a proxy for adequate perinatal medical care, presence of malformations, and the interaction of mother's pre-pregnancy weight and her gestational weight. I chose these variables a priori because I believe that they will have the greatest impact on birthweight with a clear mechanism. 
+
+```{r models, message = FALSE}
+model_crude = lm(bwt ~ blength + gaweeks, data = baby_df)
+model_inter = lm(bwt ~ bhead * blength * babysex, data = baby_df)
+model_full = lm(bwt ~ bhead + blength + babysex + mrace + fincome + malform + delwt * ppwt, 
+                data = baby_df)
 ```
 
-```{r}
-baby_df %>% 
-  modelr::add_residuals(model_fit) %>% 
-  ggplot(aes(x = resid)) +
-  geom_density()
+Now that our models have been developed, let's create the residuals and predicted values for each.
 
-baby_df %>% 
-  modelr::add_residuals(model_fit) %>% 
-  ggplot(aes(x = resid, y = gaweeks)) +
-  geom_point()
+```{r resid, message = FALSE}
+crude_model_df = 
+  baby_df %>% 
+  modelr::add_residuals(model_crude) %>% 
+  modelr::add_predictions(model_crude)
+  
+inter_model_df = 
+  baby_df %>% 
+  modelr::add_residuals(model_inter) %>% 
+  modelr::add_predictions(model_inter)
+
+full_model_df = 
+  baby_df %>% 
+  modelr::add_residuals(model_full) %>% 
+  modelr::add_predictions(model_full)
 ```
 
+And now, let's plot those residuals and predicted values for each model.
+
+```{r resid_plots, message = FALSE}
+crude_resid_plot = 
+  crude_model_df %>% 
+  ggplot(aes(x = resid, y = pred)) +
+  geom_point(alpha = 0.5)
+
+inter_resid_plot = 
+  inter_model_df %>% 
+  ggplot(aes(x = resid, y = pred)) +
+  geom_point(alpha = 0.5)
+
+full_resid_plot = 
+  full_model_df %>% 
+  ggplot(aes(x = resid, y = pred)) +
+  geom_point(alpha = 0.5)
+
+crude_resid_plot
+inter_resid_plot
+full_resid_plot
+```
+
+From these plots, we can see that while the interaction and full models are very similar, the crude model has much larger residuals and predicted values, meaning that it is likely a poorer fit for the data.
+
+To further explore this, we will do some cross validation to see which model is better at predicting the data. 
+
+```{r cv, message = FALSE}
+cv_df =
+  crossv_mc(baby_df, 100) %>% 
+  mutate(
+    train = map(train, as_tibble),
+    text = map(test, as_tibble),
+    crude_mod = map(.x = train, ~lm(bwt ~ blength + gaweeks, data = .x)),
+    inter_mod = map(.x = train, ~lm(bwt ~ bhead * blength * babysex, data = .x)),
+    full_mod = map(.x = train, ~lm(bwt ~ bhead + blength + babysex + mrace + fincome + 
+                                    malform + delwt * ppwt, data = .x)),
+    rmse_crude = map2_dbl(.x = crude_mod, .y = test, ~rmse(model = .x, data = .y)),
+    rmse_inter = map2_dbl(.x = inter_mod, .y = test, ~rmse(model = .x, data = .y)),
+    rmse_full = map2_dbl(.x = full_mod, .y = test, ~rmse(model = .x, data = .y))
+  )
+
+cv_plot = 
+  cv_df %>% 
+  select(starts_with("rmse")) %>% 
+  pivot_longer(
+    everything(),
+    names_to = "model",
+    names_prefix = "rmse_",
+    values_to = "rmse"
+  ) %>% 
+  mutate(model = fct_inorder(model)) %>% 
+  ggplot(aes(x = model, y = rmse)) +
+  geom_violin()
+
+cv_plot
+```
+
+Based on our cross validation, it appears that the full model we proposed has the best fit for the data, as it has the lowest root mean squared error. 
 
 
 
