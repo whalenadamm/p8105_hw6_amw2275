@@ -160,17 +160,38 @@ And now, let's plot those residuals and predicted values for each model.
 crude_resid_plot = 
   crude_model_df %>% 
   ggplot(aes(x = resid, y = pred)) +
-  geom_point(alpha = 0.5)
+  geom_point(alpha = 0.5) +
+  xlim(-2000, 5000) +
+  ylim(-1000, 5000) +
+  labs(
+    title = "Predicted values on residuals for crude model",
+    x = "Residuals",
+    y = "Predicted values"
+  )
 
 inter_resid_plot = 
   inter_model_df %>% 
   ggplot(aes(x = resid, y = pred)) +
-  geom_point(alpha = 0.5)
+  geom_point(alpha = 0.5) +
+  xlim(-2000, 5000) +
+  ylim(-1000, 5000) +
+  labs(
+    title = "Predicted values on residuals for interaction model",
+    x = "Residuals",
+    y = "Predicted values"
+  )
 
 full_resid_plot = 
   full_model_df %>% 
   ggplot(aes(x = resid, y = pred)) +
-  geom_point(alpha = 0.5)
+  geom_point(alpha = 0.5) +
+  xlim(-2000, 5000) +
+  ylim(-1000, 5000) +
+  labs(
+    title = "Predicted values on residuals for full model",
+    x = "Residuals",
+    y = "Predicted values"
+  )
 
 crude_resid_plot
 inter_resid_plot
@@ -214,6 +235,23 @@ cv_plot
 
 Based on our cross validation, it appears that the full model we proposed has the best fit for the data, as it has the lowest root mean squared error. 
 
+## Problem 3
+
+For this problem, we will be using bootstrapping to evaluate the NOAA weather data frame.
+
+```{r import_weather, eval = FALSE}
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    id = c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2017-01-01",
+    date_max = "2017-12-31") %>%
+  mutate(
+    name = recode(id, "USW00094728" = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) %>%
+  select(name, id, everything())
+```
 
 
 
